@@ -146,7 +146,7 @@ Notice, that there's an env variable named `DB_ENDPOINT` that points to an Auror
 Using the velero cli, take the backup of the source EKS cluster.
 
 ```bash
-velero create backup eks-backup-demo2  --include-namespaces demo
+velero create backup eks-backup-demo  --include-namespaces demo
 ```
 
 Check the status of the backup

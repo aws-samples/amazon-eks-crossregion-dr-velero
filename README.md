@@ -110,6 +110,93 @@ NAME        BACKUP     STATUS            STARTED                         COMPLET
 jhrestore   jhbackup   Completed   2024-01-26 03:08:13 +0000 UTC   2024-01-26 03:18:36 +0000 UTC   0        13         2024-01-26 03:08:13 +0000 UTC   <none>
 ```
 
+## Using Resource Modifiers
+
+Velero provides a generic ability to modify the resources during restore by specifying json patches. The json patches are applied to the resources before they are restored. The json patches are specified in a configmap and the configmap is referenced in the restore command.
+
+In this example, we're going to use Velero Restore Resource Modifiers to update an external service endpoint before restoring from a backup.
+
+### Deploy a sample workload on source cluster
+
+First, let's deploy the example workload in the source EKS cluster using `kubectl apply` command.
+
+```bash
+kubectl apply -f resource_modifier/nginx-deployment.yaml
+```
+
+Check the status of the resources created in the namespace `demo`.
+
+```bash
+$ kubectl -n demo get all
+NAME                                   READY   STATUS    RESTARTS   AGE
+pod/nginx-deployment-78cff7984-hf4h8   1/1     Running   0          23s
+pod/nginx-deployment-78cff7984-n6bmf   1/1     Running   0          23s
+
+NAME                               READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nginx-deployment   2/2     2            2           23s
+
+NAME                                         DESIRED   CURRENT   READY   AGE
+replicaset.apps/nginx-deployment-78cff7984   2         2         2       23s
+```
+
+Notice, that there's an env variable named `DB_ENDPOINT` that points to an Aurora DB cluster endpoint `mycluster.cluster-1.<source_region>.rds.amazonaws.com:3306`. When restoring the EKS cluster and its workload to a different AWS region, you can use the Velero Restore Resource Modifiers to patch the value of the endpoint at the time of restoring from the backup.
+
+### BackUp the source cluster 
+
+Using the velero cli, take the backup of the source EKS cluster.
+
+```bash
+velero create backup eks-backup-demo2  --include-namespaces demo
+```
+
+Check the status of the backup
+
+```bash
+velero get backup
+
+NAME              STATUS      ERRORS   WARNINGS   CREATED                         EXPIRES   STORAGE LOCATION   SELECTOR
+eks-backup-demo    Completed   0        0          2024-03-04 21:09:01 +0000 UTC   29d       default            <none>
+```
+
+### Create Restore Resource Modifer
+
+Now, in your destination or recovery EKS cluster on the other AWS region, create a `ConfigMap` in `velero` namespace to patch the value of the `DB_ENDPOINT` env variable to point to the Aurora cluster on that region.
+
+```bash
+
+kubectl create cm nginx-deploy-cm --from-file resource_modifier/resource_modifer.yaml -n velero
+```
+
+Then, restore the cluster from the backup `eks-backup-demo` taken avove.
+
+```bash
+velero create restore eks-restore-demo --resource-modifier-configmap nginx-deploy-cm --from-backup eks-backup-demo
+```
+
+Check the `velero restore` status
+
+```bash
+velero get restore
+```
+
+Verify that the resources on the `demo` namespace are in `Running` state.
+
+```bash
+kubectl -n demo get all
+```
+
+Now, check the value of the DB_ENDPOINT env variable by execing into a Pod.
+
+```bash
+kubectl -n demo exec nginx-deployment-849d985c48-xyzhh -- env | grep -i DB_ENDPOINT
+
+DB_ENDPOINT=mycluster.cluster-2.us-east-2.rds.amazonaws.com:3306
+```
+
+This way, you can patch any configuration parameter or specific values that your workload uses while restoring from the backup.
+
+
+
 # Clean up
 * Delete both the clusters
 * Delete the S3 buckets
